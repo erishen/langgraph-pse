@@ -7,7 +7,7 @@
 图结构:
     START → [planner] → specialist → evaluator ─┬─(通过)─▶ END
                                               └─(仍有问题)─▶ fix → evaluator (循环)
-- planner / specialist：LLM 两角色（提纲 / 写作）
+- planner / specialist：LLM 两角色（规划 / 执行）
 - evaluator：合并闸门 = LLM 评审(仅首轮) + 程序化 verify_fn 硬核查（每轮，防编造）
 - fix：LLM 按核查出的问题修正产物
 """
@@ -28,8 +28,8 @@ from .tools import read_file, run_bash
 class PSEState(TypedDict, total=False):
     task_input: str          # 给 planner / specialist 的任务上下文
     task_data: dict          # 任务额外数据（如扫描结果），供 verify_fn 使用
-    outline: str
-    article: str             # 产物（文章 / 报告）
+    plan: str                # Planner 输出的执行规划
+    artifact: str            # Specialist 输出的产物（报告 / 修正数据等）
     attempts: int
     fictitious: list         # 核查出的问题列表（程序化 + 评审合并）
     verified: list           # 通过项
@@ -44,9 +44,9 @@ def _make_planner_node(client, prompt: str, tools):
         task = state.get("task_input", "")
         agent = create_agent(client, tools, system_prompt=prompt or None)
         result = agent.invoke({"messages": [HumanMessage(content=task)]})
-        outline = result["messages"][-1].content
-        print(f"✅ 提纲已完成 ({len(outline)} 字)")
-        return {"outline": outline}
+        plan = result["messages"][-1].content
+        print(f"✅ 规划已完成 ({len(plan)} 字)")
+        return {"plan": plan}
 
     return planner
 
@@ -54,14 +54,14 @@ def _make_planner_node(client, prompt: str, tools):
 def _make_specialist_node(client, prompt: str, tools):
     def specialist(state: PSEState) -> dict:
         task = state.get("task_input", "")
-        ctx = state.get("outline") or ""
-        full = (task + "\n\n## 提纲\n" + ctx) if ctx else task
+        ctx = state.get("plan") or ""
+        full = (task + "\n\n## 执行规划\n" + ctx) if ctx else task
         agent = create_agent(client, tools, system_prompt=prompt or None)
         result = agent.invoke({"messages": [HumanMessage(content=full)]})
-        article = result["messages"][-1].content
-        if not article:
+        artifact = result["messages"][-1].content
+        if not artifact:
             raise RuntimeError("Specialist 未输出任何内容")
-        return {"article": article}
+        return {"artifact": artifact}
 
     return specialist
 
@@ -85,7 +85,7 @@ def _make_evaluator_node(client, prompt: str, verify_fn: Optional[Callable]):
     - 二者合并为 fictitious，驱动 fix 重试。
     """
     def evaluator(state: PSEState) -> dict:
-        article = state.get("article", "")
+        artifact = state.get("artifact", "")
         scan = state.get("task_data", {}).get("scan_result", {})
         attempts = state.get("attempts", 0)
 
@@ -94,7 +94,7 @@ def _make_evaluator_node(client, prompt: str, verify_fn: Optional[Callable]):
         if attempts == 0 and prompt:
             scan_str = json.dumps(scan, ensure_ascii=False, indent=2)
             full = (
-                f"## 待评估的产物\n{article}\n\n"
+                f"## 待评估的产物\n{artifact}\n\n"
                 f"## 真实数据（供核对，禁止以产物之外的内容为依据）\n{scan_str}"
             )
             agent = create_agent(client, [], system_prompt=prompt)
@@ -125,10 +125,10 @@ def _make_evaluator_node(client, prompt: str, verify_fn: Optional[Callable]):
 
 def _make_fix_node(client):
     def fix(state: PSEState) -> dict:
-        article = state["article"]
+        artifact = state["artifact"]
         issues = state.get("fictitious", [])
         if not issues:
-            return {"article": article, "eval_issues": []}
+            return {"artifact": artifact, "eval_issues": []}
         # 把真实扫描数据注入修正上下文，避免 LLM 凭空编造/删数字
         scan = state.get("task_data", {}).get("scan_result", {})
         scan_str = json.dumps(scan, ensure_ascii=False, indent=2)
@@ -143,12 +143,12 @@ def _make_fix_node(client):
             "1. 仅修正问题清单中指出的错误，将错误数字改为真实数据中的正确值\n"
             "2. 不要删除任何正确的数字或内容，保持其余部分不变\n"
             "3. 输出修正后的完整产物，不输出解释\n\n"
-            f"## 当前产物\n{article}"
+            f"## 当前产物\n{artifact}"
         )
         resp = client.invoke([HumanMessage(content=prompt)])
         fixed = resp.content if hasattr(resp, "content") else str(resp)
         # 清除评审问题，使后续重试只由程序化核查驱动
-        return {"article": fixed, "eval_issues": []}
+        return {"artifact": fixed, "eval_issues": []}
 
     return fix
 
@@ -176,7 +176,7 @@ def build_graph(
     task:        任务名，用于加载 tasks/<task>/prompts/{planner,specialist,evaluator}.md。
     tools:       注入 agent 的工具列表（默认 read_file + run_bash）。
     verify_fn:   程序化核查函数，签名 (state) -> (bad: list, ok: list)；不传则默认通过。
-    use_planner: 是否包含 planner 节点（无提纲需求的任务可关掉，从 specialist 起步）。
+    use_planner: 是否包含 planner 节点（无规划需求的任务可关掉，从 specialist 起步）。
     provider:    "deepseek" | "agnes"，决定 LLM 网关。
     返回编译后的 graph，用 graph.invoke({task_input, task_data, max_retries}) 调用。
     """

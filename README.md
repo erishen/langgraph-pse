@@ -15,8 +15,8 @@ START → [planner] → specialist → evaluator ─┬─(pass)─▶ END
                                           └─(issues)─▶ fix → evaluator (loop, max N)
 ```
 
-1. **Planner (optional)** — an agent reads context via the sandboxed `read_file` tool and produces an outline.
-2. **Specialist** — expands the outline (or the raw task input) into the final artifact (report, …).
+1. **Planner (optional)** — an agent reads context via the sandboxed `read_file` tool and produces an execution plan.
+2. **Specialist** — expands the plan (or the raw task input) into the final artifact (report, …).
 3. **Evaluator (merged gate)** — runs every round and combines two checks:
    - **Programmatic verification** via a task-supplied `verify_fn(state) -> (bad, ok)`. This is *not* an LLM judge — deterministic checks are far more reliable than asking a model to grade its own output (e.g. it guarantees every number in the report matches the scan).
    - **LLM review** (first round only): an independent reviewer inspects the artifact against the real data and flags hallucinations, fabricated samples, or weak suggestions.

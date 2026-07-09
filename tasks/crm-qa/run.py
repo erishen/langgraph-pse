@@ -87,7 +87,7 @@ def _verify_report(report: str, scan_json: dict) -> tuple[list, list]:
 
 
 def _verify_state(state: dict) -> tuple[list, list]:
-    return _verify_report(state.get("article", ""), state.get("task_data", {}).get("scan_result", {}))
+    return _verify_report(state.get("artifact", ""), state.get("task_data", {}).get("scan_result", {}))
 
 
 def main():
@@ -137,12 +137,12 @@ def main():
         f"{scan_json_str}"
     )
     result = graph.invoke({
-        "article": "",
+        "artifact": "",
         "task_data": {"scan_result": scan_result},
         "task_input": task_input,
         "max_retries": max_retries,
     })
-    report = result.get("article", "")
+    report = result.get("artifact", "")
     out_path = BASE / "qa_report.md"
     out_path.write_text(report, encoding="utf-8")
     print(f"\n✅ 自然语言 QA 报告已保存 → {out_path}")
