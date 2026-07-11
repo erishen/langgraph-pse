@@ -9,7 +9,6 @@ LangChain 的 `max_retries` 已能覆盖大部分瞬时错误；这里再叠加�
   - "agnes"：用 AGNES_* 变量
 """
 
-import os
 
 from langchain_openai import ChatOpenAI
 

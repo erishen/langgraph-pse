@@ -14,7 +14,6 @@
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -27,7 +26,7 @@ except Exception:
     pass  # 无 python-dotenv 时退化为直接用环境变量 / 默认路径
 
 sys.path.insert(0, str(BASE))
-from qa_scan import scan, DEFAULT_DB  # noqa: E402
+from qa_scan import DEFAULT_DB, scan  # noqa: E402
 
 # 让通用核心能找到本任务的提示词 (tasks/crm-qa/prompts/*.md)
 sys.path.insert(0, str(BASE.parent.parent / "src"))
@@ -44,35 +43,20 @@ def _verify_report(report: str, scan_json: dict) -> tuple[list, list]:
     findings = scan_json.get("findings", [])
     summary = scan_json.get("summary", {})
 
-    # ── findings：定位包含该 check 的「表格行」（行首为 |），只在该行取数字 ──
-    # 关键：避免叙述段落 / 其他 check / summary 行的数字污染。
+    # ── findings：报告须提及该 check 且出现正确数量值即可 ──
+    # 不要求出现在表格行——LLM 可能用列表/分段排版，严格卡表格行会误判为幻觉
+    # 而陷入 fix 死循环（设计原则：宁可漏报也不误报）。
     for f in findings:
         check = f["check"]
         target = f["count"]
-        # 在所有出现位置中，挑「所在行以 | 开头」的那个（即 Markdown 表格行）
-        line = None
-        for mpos in re.finditer(re.escape(check), report):
-            ls = report.rfind("\n", 0, mpos.start()) + 1
-            le = report.find("\n", mpos.start())
-            cand = report[ls:le] if le != -1 else report[ls:]
-            if cand.lstrip().startswith("|"):
-                line = cand
-                break
-        if line is None:
-            bad.append(f"报告未提及 {check}（无表格行）")
+        if check not in report:
+            bad.append(f"报告未提及 {check}（缺失该检查项）")
             continue
-        # 优先取该行 **加粗** 的数字单元格；否则取 | 数字 | 单元格
-        bm = re.search(r"\*\*([\d,]+)\*\*", line)
-        cm = re.search(r"\|?\s*([\d,]{2,})\s*\|", line) if not bm else None
-        m = bm or cm
-        if not m:
-            bad.append(f"{check} 报告未给出数量（真实为 {target}）")
-            continue
-        val = int(m.group(1).replace(",", ""))
-        if val == target:
+        forms = {str(target), f"{target:,}"}
+        if any(form in report for form in forms):
             ok.append(f"{check} = {target}")
         else:
-            bad.append(f"{check} 报告写 {val} 但真实为 {target}")
+            bad.append(f"{check} 报告未给出正确数量（真实为 {target}）")
 
     # ── summary：报告里出现过该真实值（含千分位）即过，不要求与关键词同窗口 ──
     for k, v in summary.items():

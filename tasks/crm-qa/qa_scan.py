@@ -208,7 +208,8 @@ def scan(db_path: str = DEFAULT_DB) -> dict:
     if _tz_bad:
         findings.append(Finding(
             "contact_date_tz_mismatch_candidate", "info", _tz_bad,
-            "contact_date 与同联系人最近聊天的上海时区日期相差 >1 天（疑似早期 UTC/local 跨日错位残留）；无对应聊天的记录不计入",
+            "contact_date 与同联系人最近聊天的上海时区日期相差 >1 天"
+            "（疑似早期 UTC/local 跨日错位残留）；无对应聊天的记录不计入",
             _tz_samples,
         ))
 

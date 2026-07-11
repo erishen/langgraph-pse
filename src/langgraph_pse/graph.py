@@ -17,9 +17,8 @@ from typing import Callable, Optional, TypedDict
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 
-from .config import settings
 from .model import create_model
 from .prompts import load_prompt
 from .tools import read_file, run_bash
@@ -66,6 +65,17 @@ def _make_specialist_node(client, prompt: str, tools):
     return specialist
 
 
+def _real_data(state: PSEState) -> dict:
+    """取出任务真实数据载荷，任务无关：优先 scan_result，其次 review_data。
+
+    原 crm-qa 把扫描结果放在 task_data['scan_result']；新增任务（如 weekly-review）
+    放在 task_data['review_data']。二者皆可由 evaluator / fix 节点作为真实对照注入，
+    避免把校验/修正逻辑写死在单一 key 上。
+    """
+    td = state.get("task_data", {}) or {}
+    return td.get("scan_result") or td.get("review_data") or {}
+
+
 def _parse_eval_issues(text: str) -> list[str]:
     """解析评审员(LLM)输出：PASS/无问题 → []；否则收集 '- ' 开头的行。"""
     if not text:
@@ -86,7 +96,7 @@ def _make_evaluator_node(client, prompt: str, verify_fn: Optional[Callable]):
     """
     def evaluator(state: PSEState) -> dict:
         artifact = state.get("artifact", "")
-        scan = state.get("task_data", {}).get("scan_result", {})
+        scan = _real_data(state)
         attempts = state.get("attempts", 0)
 
         # 1) LLM 评审（仅首轮）
@@ -129,20 +139,22 @@ def _make_fix_node(client):
         issues = state.get("fictitious", [])
         if not issues:
             return {"artifact": artifact, "eval_issues": []}
-        # 把真实扫描数据注入修正上下文，避免 LLM 凭空编造/删数字
-        scan = state.get("task_data", {}).get("scan_result", {})
+        # 把真实数据注入修正上下文，避免 LLM 凭空编造/删数字
+        scan = _real_data(state)
         scan_str = json.dumps(scan, ensure_ascii=False, indent=2)
         print("  🔄 自动修正中...")
         prompt = (
             "以下产物被程序化核查发现问题，请修正。\n\n"
-            f"**问题清单（必须修复）**:\n" + "\n".join(f"- {i}" for i in issues) + "\n\n"
+            "**问题清单（必须修复）**:\n" + "\n".join(f"- {i}" for i in issues) + "\n\n"
             "**真实数据（修正时必须以此为准，把错误数字改为真实值，"
             "不得编造也不得删除数字）**:\n"
             f"{scan_str}\n\n"
             "**规则**:\n"
             "1. 仅修正问题清单中指出的错误，将错误数字改为真实数据中的正确值\n"
             "2. 不要删除任何正确的数字或内容，保持其余部分不变\n"
-            "3. 输出修正后的完整产物，不输出解释\n\n"
+            "3. 若真实数据中某样本列表（如 cooling_sample / follow_up_sample）为空，"
+            "对应章节必须写明「无」，严禁编造联系人、数字或创建表格行\n"
+            "4. 输出修正后的完整产物，不输出解释\n\n"
             f"## 当前产物\n{artifact}"
         )
         resp = client.invoke([HumanMessage(content=prompt)])
