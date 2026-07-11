@@ -15,7 +15,8 @@ import os
 import sqlite3
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 
 @dataclass
@@ -163,16 +164,52 @@ def scan(db_path: str = DEFAULT_DB) -> dict:
             "contact_date 早于 2000 年（异常）",
         ))
 
-    # 7. UTC/local 错位候选：contact_date != DATE(created_at)
-    #    含合理情况（手动改期），仅作参考信号，标记为 info
-    tz = q1(
-        """SELECT COUNT(*) AS cnt FROM contact_records
-           WHERE created_at IS NOT NULL AND contact_date != DATE(created_at)"""
-    )
-    if tz and tz[0]["cnt"]:
+    # 7. 时区错位重定义（info，仅参考）—— 与 personal-crm get_qa_report 对齐：
+    #    原判定把「业务互动日 ≠ 记录导入UTC时间」全算候选(曾误报 9768 条)——两者本就不该相等。
+    #    现改为：仅当 contact_date 与「同联系人聊天 sent_at 的上海时区日期」相差 >1 天才报；
+    #    无对应聊天的记录无法判断，跳过。导入阶段已用上海时区算 contact_date(wechat_sync.py)，
+    #    故此项不动真实业务数据。sent_at 在库中存为 naive UTC。
+    _shanghai = ZoneInfo("Asia/Shanghai")
+
+    def _local_date(dt: datetime) -> date:
+        if dt.tzinfo is None:
+            return (dt + timedelta(hours=8)).date()
+        return dt.astimezone(_shanghai).date()
+
+    _chat_local_dates: dict[int, set] = {}
+    for _cid, _sent_raw in q1(
+        "SELECT contact_id, sent_at FROM chat_messages "
+        "WHERE sent_at IS NOT NULL AND contact_id IS NOT NULL"
+    ):
+        try:
+            _sent = datetime.fromisoformat(_sent_raw)
+        except (ValueError, TypeError):
+            continue
+        _chat_local_dates.setdefault(int(_cid), set()).add(_local_date(_sent))
+    _tz_bad = 0
+    _tz_samples: list = []
+    for _cid_raw, _cd_raw in q1(
+        "SELECT contact_id, contact_date FROM contact_records WHERE contact_date IS NOT NULL"
+    ):
+        _dates = _chat_local_dates.get(int(_cid_raw))
+        if not _dates:
+            continue  # 无对应聊天，无法判断，跳过
+        try:
+            _cd = date.fromisoformat(_cd_raw)
+        except (ValueError, TypeError):
+            continue
+        _min_gap = min(abs((_cd - _d).days) for _d in _dates)
+        if _min_gap > 1:
+            _tz_bad += 1
+            if len(_tz_samples) < 10:
+                _tz_samples.append(
+                    f"contact_id={_cid_raw} contact_date={_cd_raw} 最近聊天本地日期={sorted(_dates)[-1]}"
+                )
+    if _tz_bad:
         findings.append(Finding(
-            "contact_date_tz_mismatch_candidate", "info", tz[0]["cnt"],
-            "contact_date 与 created_at 的 UTC 日期不一致（可能是已知 UTC/local 跨日 bug 残留；含合理改期，仅供参考）",
+            "contact_date_tz_mismatch_candidate", "info", _tz_bad,
+            "contact_date 与同联系人最近聊天的上海时区日期相差 >1 天（疑似早期 UTC/local 跨日错位残留）；无对应聊天的记录不计入",
+            _tz_samples,
         ))
 
     # 8. 空内容
