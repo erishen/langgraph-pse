@@ -4,77 +4,144 @@
 
 # LangGraph PSE
 
-基于 [LangGraph](https://github.com/langchain-ai/langgraph) 的 **Planner-Specialist-Evaluator** 多 Agent 框架。它把通用的「生成 → 程序化核查 → 自动修正」循环建模成一张带条件边的显式**状态图**：任何「产出某物，再用程序化方式核查，不通过就自动修」的工作流，只要提供任务名 + 一个核查函数即可挂载。
+一个**任务无关的**、基于 [LangGraph](https://github.com/langchain-ai/langgraph) 的 **Planner–Specialist–Evaluator（PSE）** 多 Agent 框架。它把通用的「生成 → 程序化核查 → 自动修正」循环建模成一张带条件边的显式**状态图**。**新增任务只需在 `tasks/` 下放一个文件夹**、提供任务名 + 一个核查函数——核心图代码永不改动。
 
-这是 [`crewai-pse`](../crewai-pse) 和 [`autogen-pse`](../autogen-pse) 的 LangGraph 版本——同样的 PSE 理念，不同的编排原语：**用 `StateGraph` + 条件边**，而非 agent 循环或 team。
+这是 [`crewai-pse`](../crewai-pse)、[`autogen-pse`](../autogen-pse)、[`llamaindex-pse`](../llamaindex-pse) 的 LangGraph 版本——同样的 PSE 理念，不同的编排原语：用 `StateGraph` + 条件边，而非 crew、群聊或事件工作流。
+
+仓库当前内置**两个任务**，二者共同证明核心是真正可复用的，而非一次性实现：
+
+- `crm-qa`——`personal-crm` 数据质量看门狗（确定性扫描 + 可选的经核查 LLM 报告）。
+- `weekly-review`——`personal-crm` 每周关系复盘（确定性聚合 + 可选的经核查 LLM 报告）。
+
+> [!NOTE]
+> **成本。** 确定性模式（`make crm-qa`、`make weekly-review`）**零成本**——完全不调 LLM。`--llm` 报告模式的成本 = 一次生成 + 每轮修正一次调用；在 DeepSeek Chat 上一篇报告通常 **2 轮收敛**、远低于 **¥0.05**。免费的 **Agnes** 网关（`--provider agnes`）让 LLM 运行基本免费。每次运行都会打印轮数与程序化核查的通过/失败情况。
 
 ## 工作原理
 
+框架提供一个可复用、**任务无关的 PSE 引擎**（`src/langgraph_pse`）；每个*任务*自带提示词、自带确定性数据层，以及一个 `verify_fn`。
+
 ```
-START → [planner] → specialist → evaluator ─┬─(通过)─▶ END
-                                          └─(有问题)─▶ fix → evaluator（循环，最多 N 轮）
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PSE 引擎  (src/langgraph_pse —— 任务无关)                                  │
+│                                                                            │
+│   build_graph(task, verify_fn, use_planner)                               │
+│                                                                            │
+│   START → [planner] → specialist → evaluator ─┬─(通过)──────────▶ END       │
+│             (可选)                             └─(有问题)─▶ fix ─┐          │
+│                                                     ▲            │         │
+│                                                     └────────────┘         │
+│                                                  条件边                     │
+│                                                  (should_fix, 最多 N 轮)    │
+│                                                                            │
+│   evaluator = 程序化 verify_fn （第 1 轮附带 LLM 评审）                     │
+│   fix       = LLM 调用，仅修正被标记的问题，并回注真实数据，杜绝编造        │
+└──────────────────────────────────────────────────────────────────────────┘
+            ▲
+            │  每个任务通过  tasks/<task>/prompts/*.md + run.py (verify_fn)  挂载
+┌───────────┴─────────────────────────────────────────────────────────────┐
+│  tasks/crm-qa/         ← 任务 1：CRM 数据质量看门狗                         │
+│  tasks/weekly-review/  ← 任务 2：CRM 每周关系复盘                          │
+│  tasks/<你的任务>/     ← 自行添加；引擎保持不动                            │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Planner（可选）** — agent 通过沙箱 `read_file` 读取上下文，产出执行规划。
-2. **Specialist** — 把规划（或原始任务输入）展开为最终产物（报告 / …）。
-3. **Evaluator（合并闸门）** — 每轮都跑，融合两道核查：
-   - **程序化验证**：由任务注入的 `verify_fn(state) -> (bad, ok)` 做确定性检查。刻意**不做** LLM 裁判——确定性验证比让模型评判自己输出可靠得多（例如它保证报告里每个数字都与扫描结果一致）。
-   - **LLM 评审**（仅首轮）：独立评审员对照真实数据审查产物，揪出幻觉、编造的样本名、空泛建议。
-4. **Fix → Evaluator 循环** — LangGraph 的条件边让 `fix`（删除/修订被标记问题的 LLM 调用）最多重试 `PSE_MAX_RETRIES` 轮。
+1. **Planner（可选）**——通过沙箱化的 `read_file` 工具读取上下文，产出执行计划。按任务用 `use_planner` 开关。
+2. **Specialist**——把计划（或原始任务输入）扩写为最终产物（一份报告）。
+3. **Evaluator（合并关卡）**——每轮都跑，组合两道检查：
+   - **程序化核查**：任务提供的 `verify_fn(state) -> (bad, ok)`。这**不是** LLM 裁判——确定性检查远比让模型给自己打分可靠（例如报告里的每个数字都保证与真实数据一致）。
+   - **LLM 评审**（仅第 1 轮）：独立评审员标出幻觉、编造样本或空泛建议。
+4. **Fix → Evaluator 循环**——LangGraph 的条件边最多重跑 `fix` `PSE_MAX_RETRIES` 次。修正时会把真实数据回注进提示词，让模型**改对数字**而不是**编造新数字**。
 
-重试循环（Evaluator → Fix → Evaluator）天生适合**条件边**——不用手写循环计数、不用重复调用 team，图本身就是控制流。
+重试循环天然契合**条件边**——无需手写计数器、无需重新拉起 team。图本身即控制流。
 
-## 为什么用 LangGraph？
+### 任务无关的核心
 
-| | crewai-pse | langgraph-pse |
-|---|---|---|
-| 编排 | `Crew` + `Process.sequential` | `StateGraph` + 条件边 |
-| 重试循环 | `run.py` 里的手动 `for` 循环 | `add_conditional_edges("evaluator", should_fix)` |
-| 工具调用 | CrewAI `Agent.tools` | LangGraph `create_agent`（v1 API） |
-| 验证步骤 | `run.py` 里的正则/grep | 图内注入的 `verify_fn` |
-| 评审闸门 | — | 独立 **Evaluator** 节点（LLM 评审 + 程序化核查） |
+`build_graph` 刻意与任何单一任务解耦。`evaluator` 和 `fix` 节点通过一个小助手 `_real_data(state)` 读取真实数据，它接受**任意**任务的数据键（crm-qa 用 `scan_result`，weekly-review 用 `review_data`）。这意味着新任务只需注入自己的数据对象、原样复用图——两个内置任务走的正是这条路径，这就是核心可复用的证明。
 
-## 项目结构
+## 目录结构
 
 ```
 langgraph-pse/
 ├── src/langgraph_pse/        # 核心框架（任务无关）
-│   ├── __init__.py           # 公开 API: build_graph(), create_model()
+│   ├── __init__.py           # 公共 API：build_graph()、create_model()
 │   ├── config.py             # 从环境变量 / .env 读取配置
 │   ├── model.py              # 带重试的 ChatOpenAI 客户端（deepseek / agnes）
-│   ├── tools.py              # read_file（沙箱）+ run_bash（沙箱）+ query_crm（只读）
-│   ├── prompts.py            # 提示词加载（tasks/<task>/prompts/*.md）
-│   └── graph.py              # StateGraph: planner → specialist → evaluator → fix
-├── tasks/
-│   └── crm-qa/               # 任务：personal-crm 数据质量看门狗
-│       ├── run.py            # 入口——确定性扫描（默认）+ 可选 LLM 报告
-│       ├── qa_scan.py        # 只读 SQLite QA 扫描器
-│       └── prompts/
-│           ├── planner.md    # Planner 系统提示词
-│           ├── specialist.md # Specialist 系统提示词
-│           └── evaluator.md  # Evaluator 系统提示词（评审规则）
+│   ├── tools.py              # read_file + run_bash（沙箱）+ query_crm（只读）
+│   ├── prompts.py            # 提示词加载器 → tasks/<task>/prompts/<name>.md
+│   └── graph.py              # StateGraph：planner → specialist → evaluator → fix
+├── tasks/                    # ← 扩展点：一个任务一个文件夹
+│   ├── crm-qa/               # 任务 1：数据质量看门狗
+│   │   ├── run.py            # 入口——确定性扫描（默认）+ 可选 LLM 报告
+│   │   ├── qa_scan.py        # 只读 SQLite QA 扫描器
+│   │   └── prompts/{planner,specialist,evaluator}.md
+│   └── weekly-review/        # 任务 2：每周关系复盘
+│       ├── run.py            # 入口——确定性聚合（默认）+ 可选 LLM 报告
+│       ├── review_data.py    # 只读 SQLite 聚合（指标 + 变冷关系 + 待跟进）
+│       └── prompts/{planner,specialist,evaluator}.md
 ├── pyproject.toml
 ├── Makefile
 └── .env.example
 ```
 
+## 新增一个任务
+
+由于引擎任务无关，你**永远不用改 `src/`**。新增名为 `my-task` 的任务：
+
+**1. 建提示词文件夹**——`planner.md`、`specialist.md`、`evaluator.md`：
+
+```
+tasks/my-task/prompts/planner.md
+tasks/my-task/prompts/specialist.md
+tasks/my-task/prompts/evaluator.md
+```
+
+当你给 `build_graph` 传 `task="my-task"` 时，加载器会自动解析 `tasks/my-task/prompts/<name>.md`。
+
+**2. 写确定性数据层 + `verify_fn`**——一个只读读取真实数据的普通函数，和一个返回 `(bad, ok)` 两个列表的核查器：
+
+```python
+def verify_fn(state) -> tuple[list[str], list[str]]:
+    data = state["task_data"]["my_data"]   # 你注入的真实数据
+    bad, ok = [], []
+    # state["artifact"] 里的每条主张都必须命中 `data`
+    ...
+    return bad, ok   # bad 非空 → 触发一轮修正；bad 为空 → 通过
+```
+
+**3. 在 `tasks/my-task/run.py` 里接线：**
+
+```python
+from langgraph_pse import build_graph
+
+graph = build_graph(task="my-task", verify_fn=verify_fn, use_planner=True)
+result = graph.invoke({
+    "task_input": "…",
+    "task_data": {"my_data": my_deterministic_data},
+})
+print(result["artifact"])
+```
+
+**4.（可选）加 Makefile 目标**，沿用现有模式（`确定性` / `--provider deepseek` / `--provider agnes`）。
+
+就这样。核心图、重试逻辑、沙箱全部原样复用。
+
 ## 安装
 
 ```bash
-make install        # 或: uv sync
+make install        # 或：uv sync
 ```
 
 ## 配置
 
-把 `.env.example` 复制为 `.env` 并填写：
+复制 `.env.example` 为 `.env` 并填入你的值：
 
 ```bash
 cp .env.example .env
 ```
 
-生成 LLM 报告需要 **`OPENAI_*` 组（DeepSeek，OpenAI 兼容）** 或 **`AGNES_*` 组** 二者之一；通过 `--provider {deepseek,agnes}` 切换。
+跑 LLM 报告需要**要么**配好 `OPENAI_*`（DeepSeek 兼容 OpenAI 协议），**要么**配好 `AGNES_*`。二者都可通过 `--provider {deepseek,agnes}` 切换。
 
-| 变量 | 必填 | 说明 |
+| 变量 | 必需 | 说明 |
 |---|---|---|
 | `OPENAI_API_KEY` | ✅* | LLM API key（OpenAI 兼容，如 DeepSeek） |
 | `OPENAI_BASE_URL` | ✅* | LLM API base URL |
@@ -82,48 +149,77 @@ cp .env.example .env
 | `AGNES_KEY` | ✅† | 备选：Agnes API key（免费模型） |
 | `AGNES_BASE_URL` | ✅† | 备选：Agnes base URL |
 | `AGNES_MODEL` | ✅† | 备选：Agnes 模型名（如 `agnes-2.0-flash`） |
-| `PSE_ROOT` | ✅ | `read_file` / `run_bash` 沙箱根路径 |
-| `CRM_DB_PATH` | ✅ | personal-crm 的 `crm.db` 路径（只读） |
-| `PSE_MAX_RETRIES` | | 最大验证/修正轮数（默认 `3`） |
+| `PSE_ROOT` | ✅ | `read_file` / `run_bash` 的沙箱根目录 |
+| `CRM_DB_PATH` | ✅ | personal-crm 的 `crm.db` 路径（只读；两个任务都用） |
+| `PSE_MAX_RETRIES` | | evaluator/fix 最大轮数（默认 `3`） |
 
-\* 使用 `--provider deepseek`（默认）时必填。 &nbsp; † 使用 `--provider agnes` 时必填。
+\* 用 `--provider deepseek`（默认）时必需。  &nbsp; † 用 `--provider agnes` 时必需。
 
-## 用法 — crm-qa（数据质量看门狗）
+## 任务
+
+### `crm-qa`——数据质量看门狗
+
+扫描 `crm.db` 里已知的数据质量问题（重复 `wechat_id`、未改名、缺清洗字段、孤儿聊天、时区错位、空记录……）。加 `--llm` 会写出一份经核查的中文 QA 报告，其中数字**保证与扫描一致**（由 `verify_fn` 强制）。
 
 ```bash
 # 仅确定性扫描（零成本，无需 API key）
 make crm-qa
-make crm-qa-scan
 python tasks/crm-qa/run.py --db /path/to/crm.db
 
-# 用 LLM 生成自然语言 QA 报告（需 key）
+# 用 LLM 生成自然语言 QA 报告
 make crm-qa-report            # --provider deepseek（默认）
 make crm-qa-agnes             # --provider agnes
 python tasks/crm-qa/run.py --llm --provider agnes
-
-# 透传额外参数（例如限制重试轮数）
-make crm-qa-agnes FLAGS="--max-retries 2"
-
-# 列出全部命令
-make help
 ```
 
-看门狗扫描 `crm.db` 的已知数据质量问题（重复 `wechat_id`、未改名、clean 字段缺失、孤儿聊天、时区错位、空记录等）；加 `--llm` 会写出一份**数字经过核查、保证与扫描一致**的中文 QA 报告（由 `verify_fn` 强制保证）。
+> **只看门、不自动修。** crm-qa 刻意只*报告*问题，绝不修改 `crm.db`。任何修复都保留为人工步骤，让模型永远无法改动生产数据。
 
-> **设计原则 — 只报警、不修复。** crm-qa 故意*只报告*问题，绝不修改 `crm.db`。所有数据库访问都是只读（扫描器用 `mode=ro&immutable=1`，`query_crm` 只允许单条 `SELECT`）。任何修复都留在人工步骤，绝不让模型改动生产数据。
+### `weekly-review`——每周关系复盘
 
-## 新建一个任务
+第二个任务，专为证明核心可复用而加。`review_data.py` 对 `crm.db` 做确定性只读聚合（13 项核心指标 + 「变冷关系」Top-N 表 + 待跟进样本 + 分组透视，零 LLM）。加 `--llm` 后由 PSE 三角色写出中文复盘，其中每个指标、联系人名、天数、跟进日期都必须与聚合精确一致——`verify_fn` 会拒绝任何编造的联系人或数字。
 
-1. 创建 `tasks/<your-task>/prompts/{planner,specialist,evaluator}.md`。
-2. 调用 `build_graph(task="<your-task>", verify_fn=..., use_planner=...)`。
-3. `verify_fn(state) -> (bad, ok)` 即你的确定性核查；图会循环 `fix` 直到通过或达到 `max_retries`。
+```bash
+# 仅确定性聚合（零成本）
+make weekly-review
+python tasks/weekly-review/run.py --db /path/to/crm.db
+
+# 用 LLM 生成自然语言复盘
+make weekly-review-report     # --provider deepseek（默认）
+make weekly-review-agnes      # --provider agnes
+python tasks/weekly-review/run.py --llm --provider agnes
+```
+
+两个任务都严格只读打开数据库（扫描/聚合用 `mode=ro&immutable=1`；`query_crm` 工具仅允许单条 `SELECT`）。
+
+## 关键设计决策
+
+**用程序化核查而非纯 LLM 评估。** Evaluator 组合了 LLM 评审（第 1 轮）与确定性 `verify_fn`，且 `verify_fn` 是权威。确定性检查能抓住 LLM 可能「批准」的幻觉人名、错误计数、编造样本。
+
+**宽松匹配，而非脆弱的表格解析。** `verify_fn` 只要报告里任意位置出现「检查名 + 正确的值」就判过——不强制某种 Markdown 表格排版。这避免了 LLM 用列表而非表格输出时被误判为「幻觉」（这是曾导致修正循环永不收敛的真实 bug）。
+
+**真实数据回注修正提示。** 触发修正轮时，确定性数据对象会被回传给模型，让它**改对数字**而不是**编造貌似合理的替代**。修正提示还禁止为空样本编造行（应写「无」）。
+
+**沙箱化、只读的数据访问。** `read_file` 只读 `PSE_ROOT` 下的文件；`run_bash` 拦截破坏性命令；`query_crm` 仅允许单条 `SELECT`；扫描器以 `mode=ro&immutable=1` 打开库。模型永远无法改动生产数据。
+
+## 与兄弟框架的关系
+
+四者共享 **PSE 角色模型**与**验证→修正循环**，区别在编排：
+
+| | `autogen-pse` | `crewai-pse` | `langgraph-pse` | `llamaindex-pse` |
+|---|---|---|---|---|
+| 编排 | AutoGen `RoundRobinGroupChat` | CrewAI `Sequential` | **LangGraph `StateGraph` + 条件边** | LlamaIndex `Workflow` + `@step` + Event |
+| 重试循环 | 两段式直连 API + grep 核查 | `run.py` 里程序化核查 | `add_conditional_edges("evaluator", should_fix)` | Evaluator 返回 `FixEvent` / `StopEvent` |
+| 核查步骤 | 对源码 grep | `run.py` 里正则/grep | 图中注入 `verify_fn` | 工作流中注入 `verify_fn` |
+| RAG | 可选 | — | — | **内置**（`retriever`，源头接地） |
+| 实际用途 | asset-lens → 下周投资建议 | 项目代码 → 中英文章 → WordPress | **CRM 数据质量 QA + 每周关系复盘** | 简历定制（RAG） |
+| 最适合 | 便宜、高频草稿 | 更丰富的多 Agent 发布 | 需要显式状态控制 + 抗幻觉关卡的工作流 | RAG 接地生成 |
 
 ## 安全说明
 
-- **无硬编码密钥。** 所有凭证均从 `.env` 读取，`.env` 已 gitignore；含个人数据的生成物（`qa_report.md`、`scan_*.json`）同样已被忽略。
-- **沙箱工具.** `read_file` 只能读 `PSE_ROOT` 内文件；`run_bash` 拦截破坏性命令（`rm -rf`、`dd`、`curl|sh` 等）并在 `PSE_ROOT` 内运行。
-- **数据库只读.** `query_crm` 只允许对 `crm.db` 的单条 `SELECT`；QA 扫描器以 `mode=ro&immutable=1` 打开库。
-- **无网络暴露服务.** 本项目仅作为本地 CLI 运行。
+- **无硬编码密钥。** 所有凭据从 `.env` 读取，且 `.env` 已 gitignore。
+- **生成产物已 gitignore。** 含 PII 的报告（`qa_report.md`、`weekly_review.md`、`scan_*.json`）永不进版本库。
+- **沙箱工具 + 只读库。** 见[关键设计决策](#关键设计决策)。
+- **无网络暴露服务。** 本项目作为本地 CLI 运行。
 
 ## 许可证
 
