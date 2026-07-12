@@ -94,10 +94,13 @@ def query_crm(sql: str) -> str:
 
 
 @tool("crm_qa_scan")
-def crm_qa_scan(db_path: str = "") -> str:
-    """运行 personal-crm 数据质量扫描，返回 JSON 报告（只读，绝不修改数据库）。
+def crm_qa_scan(base_url: str = "") -> str:
+    """获取 personal-crm 数据质量报告，返回 JSON（只读，绝不修改数据库）。
 
-    可选参数 db_path 为 crm.db 路径；留空则用默认路径或环境变量 CRM_DB_PATH。
+    数据质量检查的唯一真源在 personal-crm 后端（crud.get_qa_report），
+    本工具通过 GET /api/qa/report 调用它，避免双仓逻辑漂移。
+    可选参数 base_url 为 personal-crm 后端地址（含 http://），
+    留空则用环境变量 CRM_API_BASE_URL（默认 http://127.0.0.1:8000）。
     返回的 JSON 含 summary（各表行数）与 findings（每项含 check/severity/count/description）。
     """
     try:
@@ -105,14 +108,13 @@ def crm_qa_scan(db_path: str = "") -> str:
             0,
             str(Path(__file__).resolve().parent.parent.parent / "tasks" / "crm-qa"),
         )
-        from qa_scan import scan as _scan
+        from qa_scan import fetch_qa_report
     except Exception as e:
         return f"[错误] 无法加载扫描器: {e}"
-    db = db_path or os.getenv("CRM_DB_PATH", _CRM_DB_DEFAULT)
     try:
-        return json.dumps(_scan(db), ensure_ascii=False, indent=2)
+        return json.dumps(fetch_qa_report(base_url or None), ensure_ascii=False, indent=2)
     except Exception as e:
-        return f"[错误] 扫描失败: {e}"
+        return f"[错误] 调用失败: {e}"
 
 
 # 供 graph 节点引用

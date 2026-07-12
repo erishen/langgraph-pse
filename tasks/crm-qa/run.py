@@ -1,14 +1,18 @@
 """LangGraph PSE — personal-crm 数据质量看门狗（crm-qa 任务）。
 
+数据质量检查的唯一真源在 personal-crm 后端（crud.get_qa_report，经
+GET /api/qa/report 暴露）。本任务通过 qa_scan.fetch_qa_report 调用该 API，
+不再自行重扫数据库，避免双仓逻辑漂移。
+
 流程：
-    默认：直接跑确定性扫描（零成本，无需 langgraph / API key）
+    默认：调用 API 拉取确定性报告（零成本，无需 langgraph / API key）
     --llm：用通用 PSE 图 → Planner 提纲 → Specialist 写报告 →
            Evaluator(LLM) 评审 → Verify(程序化核对数字) → (不符则 Fix 重试)
 
 用法:
-    python run.py                 # 仅跑确定性扫描
+    python run.py                 # 调用 API 拉取并打印质量报告
     python run.py --llm          # 额外用 LLM 生成自然语言报告（需 langgraph + OPENAI_API_KEY）
-    python run.py --db <路径>     # 指定 crm.db
+    python run.py --api-base-url http://127.0.0.1:8000   # 指定后端地址
 """
 
 import argparse
@@ -26,7 +30,7 @@ except Exception:
     pass  # 无 python-dotenv 时退化为直接用环境变量 / 默认路径
 
 sys.path.insert(0, str(BASE))
-from qa_scan import DEFAULT_DB, scan  # noqa: E402
+from qa_scan import DEFAULT_API_BASE_URL, fetch_qa_report  # noqa: E402
 
 # 让通用核心能找到本任务的提示词 (tasks/crm-qa/prompts/*.md)
 sys.path.insert(0, str(BASE.parent.parent / "src"))
@@ -76,15 +80,16 @@ def _verify_state(state: dict) -> tuple[list, list]:
 
 def main():
     ap = argparse.ArgumentParser(description="personal-crm 数据质量看门狗 (langgraph-pse)")
-    ap.add_argument("--db", default=os.getenv("CRM_DB_PATH", DEFAULT_DB))
+    ap.add_argument("--api-base-url", default=os.getenv("CRM_API_BASE_URL", DEFAULT_API_BASE_URL),
+                    help="personal-crm 后端地址（含 http://），默认取 CRM_API_BASE_URL 或 http://127.0.0.1:8000")
     ap.add_argument("--llm", action="store_true",
                     help="用 LLM 生成自然语言 QA 报告（需 langgraph + API key）")
     ap.add_argument("--provider", choices=["deepseek", "agnes"], default="deepseek",
                     help="LLM 网关：deepseek（默认）或 agnes（需配置 AGNES_*）")
     args = ap.parse_args()
 
-    print(f"🔍 运行确定性扫描: {args.db}")
-    scan_result = scan(args.db)
+    print(f"🔍 调用数据质量 API: {args.api_base_url}/api/qa/report")
+    scan_result = fetch_qa_report(args.api_base_url)
     s = scan_result["summary"]
     print(f"   概况: contacts={s['contacts']}  contact_records={s['contact_records']}  "
           f"chat_messages={s['chat_messages']}")

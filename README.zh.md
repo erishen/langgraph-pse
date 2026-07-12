@@ -72,7 +72,7 @@ langgraph-pse/
 ├── tasks/                    # ← 扩展点：一个任务一个文件夹
 │   ├── crm-qa/               # 任务 1：数据质量看门狗
 │   │   ├── run.py            # 入口——确定性扫描（默认）+ 可选 LLM 报告
-│   │   ├── qa_scan.py        # 只读 SQLite QA 扫描器
+│   │   ├── qa_scan.py        # personal-crm /api/qa/report 的 HTTP 客户端（唯一真源）
 │   │   └── prompts/{planner,specialist,evaluator}.md
 │   └── weekly-review/        # 任务 2：每周关系复盘
 │       ├── run.py            # 入口——确定性聚合（默认）+ 可选 LLM 报告
@@ -199,7 +199,7 @@ python tasks/weekly-review/run.py --llm --provider agnes
 
 **真实数据回注修正提示。** 触发修正轮时，确定性数据对象会被回传给模型，让它**改对数字**而不是**编造貌似合理的替代**。修正提示还禁止为空样本编造行（应写「无」）。
 
-**沙箱化、只读的数据访问。** `read_file` 只读 `PSE_ROOT` 下的文件；`run_bash` 拦截破坏性命令；`query_crm` 仅允许单条 `SELECT`；扫描器以 `mode=ro&immutable=1` 打开库。模型永远无法改动生产数据。
+**沙箱化、只读的数据访问。** `read_file` 只读 `PSE_ROOT` 下的文件；`run_bash` 拦截破坏性命令；`query_crm` 仅允许单条 `SELECT`；weekly-review 以 `mode=ro&immutable=1` 打开库；crm-qa 从不直读数据库，而是经 personal-crm 的 API 读取（检查项唯一真源在 personal-crm 后端）。模型永远无法改动生产数据。
 
 ## 与兄弟框架的关系
 

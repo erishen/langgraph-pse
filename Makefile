@@ -15,22 +15,22 @@ clean: ## 清理缓存/构建产物
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	rm -rf .langgraph/ dist/ *.egg-info
 
-# 数据质量看门狗：确定性只读扫描（零成本，不改库）
-# 用法: make crm-qa [DB=/path/to/crm.db] [FLAGS=...]
-crm-qa: ## 只读扫描 crm.db 并打印 findings
-	$(PY) $(TASK) $(if $(DB),--db $(DB),) $(FLAGS)
+# 数据质量看门狗：调用 personal-crm 后端 GET /api/qa/report（单源，零成本，不改库）
+# 用法: make crm-qa [API=http://127.0.0.1:8000] [FLAGS=...]
+crm-qa: ## 调用 API 拉取并打印质量报告 findings
+	$(PY) $(TASK) $(if $(API),--api-base-url $(API),) $(FLAGS)
 
-crm-qa-scan: ## 显式只读扫描（等价于 crm-qa）
-	$(PY) $(TASK) $(if $(DB),--db $(DB),) $(FLAGS)
+crm-qa-scan: ## 显式调用（等价于 crm-qa）
+	$(PY) $(TASK) $(if $(API),--api-base-url $(API),) $(FLAGS)
 
 # 生成自然语言 QA 报告（LLM）
-# 用法: make crm-qa-report [DB=...] [FLAGS=...]   —— deepseek 默认
-#       make crm-qa-agnes   [DB=...] [FLAGS=...]   —— agnes 网关
+# 用法: make crm-qa-report [API=...] [FLAGS=...]   —— deepseek 默认
+#       make crm-qa-agnes   [API=...] [FLAGS=...]   —— agnes 网关
 crm-qa-report: ## LLM 自然语言报告（deepseek）
-	$(PY) $(TASK) --llm --provider deepseek $(if $(DB),--db $(DB),) $(FLAGS)
+	$(PY) $(TASK) --llm --provider deepseek $(if $(API),--api-base-url $(API),) $(FLAGS)
 
 crm-qa-agnes: ## LLM 自然语言报告（agnes）
-	$(PY) $(TASK) --llm --provider agnes $(if $(DB),--db $(DB),) $(FLAGS)
+	$(PY) $(TASK) --llm --provider agnes $(if $(API),--api-base-url $(API),) $(FLAGS)
 
 # 每周关系复盘：确定性只读聚合（零成本，不改库）—— 验证通用核心的第二个任务
 # 用法: make weekly-review [DB=/path/to/crm.db] [FLAGS=...]

@@ -75,7 +75,7 @@ langgraph-pse/
 ├── tasks/                    # ← extension point: one folder per task
 │   ├── crm-qa/               # Task 1: data-quality watchdog
 │   │   ├── run.py            # Entry — deterministic scan (default) + optional LLM report
-│   │   ├── qa_scan.py        # Read-only SQLite QA scanner
+│   │   ├── qa_scan.py        # HTTP client → personal-crm /api/qa/report (single source of truth)
 │   │   └── prompts/{planner,specialist,evaluator}.md
 │   └── weekly-review/        # Task 2: weekly relationship review
 │       ├── run.py            # Entry — deterministic aggregation (default) + optional LLM report
@@ -211,7 +211,7 @@ make follow-up-draft-agnes      # --provider agnes
 python tasks/follow-up-draft/run.py --llm --provider agnes
 ```
 
-Both tasks read the DB strictly read-only (`mode=ro&immutable=1` for the scanners/aggregators; a single `SELECT` only for the `query_crm` tool).
+Tasks read the DB strictly read-only. `crm-qa` calls personal-crm's `GET /api/qa/report` — the single source of truth for QA checks (no duplicate scanning); `weekly-review` aggregates directly via `mode=ro&immutable=1`; `query_crm` allows only a single `SELECT`.
 
 ## Key Design Decisions
 
@@ -221,7 +221,7 @@ Both tasks read the DB strictly read-only (`mode=ro&immutable=1` for the scanner
 
 **The real data is re-injected into the fix prompt.** When a fix round runs, the deterministic data object is passed back to the model so it corrects wrong numbers rather than inventing plausible-looking replacements. The fix prompt also forbids fabricating rows for empty samples (write "none" instead).
 
-**Sandboxed, read-only data access.** `read_file` only reads under `PSE_ROOT`; `run_bash` blocks destructive commands; `query_crm` allows only single `SELECT` statements; the scanners open the DB in `mode=ro&immutable=1`. A model can never mutate production data.
+**Sandboxed, read-only data access.** `read_file` only reads under `PSE_ROOT`; `run_bash` blocks destructive commands; `query_crm` allows only single `SELECT` statements; `weekly-review` opens the DB in `mode=ro&immutable=1`. `crm-qa` never touches the DB directly — it reads QA results from personal-crm's API. A model can never mutate production data.
 
 ## Relation to Sibling Frameworks
 
