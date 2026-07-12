@@ -1,8 +1,9 @@
-.PHONY: install lint clean crm-qa crm-qa-scan crm-qa-report crm-qa-agnes weekly-review weekly-review-report weekly-review-agnes help
+.PHONY: install lint clean crm-qa crm-qa-scan crm-qa-report crm-qa-agnes weekly-review weekly-review-report weekly-review-agnes follow-up-draft follow-up-draft-report follow-up-draft-agnes help
 
 PY := uv run python
 TASK := tasks/crm-qa/run.py
 WEEKLY := tasks/weekly-review/run.py
+DRAFT := tasks/follow-up-draft/run.py
 
 install: ## 安装依赖（uv sync）
 	uv sync
@@ -44,6 +45,20 @@ weekly-review-report: ## LLM 自然语言复盘（deepseek）
 
 weekly-review-agnes: ## LLM 自然语言复盘（agnes）
 	$(PY) $(WEEKLY) --llm --provider agnes $(if $(DB),--db $(DB),) $(FLAGS)
+
+# 跟进消息草拟：确定性只读聚合候选人+真实上下文（零成本，不改库）—— 验证通用核心的第三个任务
+# 用法: make follow-up-draft [DB=/path/to/crm.db] [FLAGS=...]
+follow-up-draft: ## 只读聚合待跟进候选人与上下文并打印
+	$(PY) $(DRAFT) $(if $(DB),--db $(DB),) $(FLAGS)
+
+# 生成个性化跟进草稿（LLM）
+# 用法: make follow-up-draft-report [DB=...] [FLAGS=...]   —— deepseek 默认
+#       make follow-up-draft-agnes   [DB=...] [FLAGS=...]   —— agnes 网关
+follow-up-draft-report: ## LLM 个性化跟进草稿（deepseek）
+	$(PY) $(DRAFT) --llm --provider deepseek $(if $(DB),--db $(DB),) $(FLAGS)
+
+follow-up-draft-agnes: ## LLM 个性化跟进草稿（agnes）
+	$(PY) $(DRAFT) --llm --provider agnes $(if $(DB),--db $(DB),) $(FLAGS)
 
 help: ## 列出全部命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

@@ -8,10 +8,11 @@ A **task-agnostic** [LangGraph](https://github.com/langchain-ai/langgraph)-power
 
 This is the LangGraph sibling of [`crewai-pse`](../crewai-pse), [`autogen-pse`](../autogen-pse) and [`llamaindex-pse`](../llamaindex-pse) — same PSE philosophy, different orchestration primitive: a `StateGraph` with conditional edges instead of a crew, a group-chat, or an event workflow.
 
-The repository currently ships **two tasks**, which together prove the core is genuinely reusable rather than a one-off:
+The repository currently ships **three tasks**, which together prove the core is genuinely reusable rather than a one-off:
 
 - `crm-qa` — a `personal-crm` data-quality watchdog (deterministic scan + optional verified LLM report).
 - `weekly-review` — a `personal-crm` weekly relationship review (deterministic aggregation + optional verified LLM report).
+- `follow-up-draft` — a `personal-crm` follow-up message drafter (deterministic candidate + context aggregation + optional verified LLM drafts).
 
 > [!NOTE]
 > **Cost.** The deterministic modes (`make crm-qa`, `make weekly-review`) cost **zero** — they never call an LLM. The `--llm` report modes cost one generation plus one round per fix retry; on DeepSeek Chat a report typically converges in **2 rounds** for well under **¥0.05**. The free **Agnes** provider (`--provider agnes`) makes LLM runs effectively free. Every run prints the round count and pass/fail of the programmatic checks.
@@ -42,6 +43,7 @@ The framework provides a reusable, **task-agnostic PSE engine** (`src/langgraph_
 ┌───────────┴─────────────────────────────────────────────────────────────┐
 │  tasks/crm-qa/         ← Task 1: CRM data-quality watchdog                 │
 │  tasks/weekly-review/  ← Task 2: CRM weekly relationship review            │
+│  tasks/follow-up-draft/← Task 3: CRM follow-up message drafter            │
 │  tasks/<your-task>/    ← add your own; the engine stays untouched         │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
@@ -57,7 +59,7 @@ The retry loop is a natural fit for **conditional edges** — no manual loop cou
 
 ### The task-agnostic core
 
-`build_graph` is deliberately decoupled from any single task. The `evaluator` and `fix` nodes read the real data through a small `_real_data(state)` helper that accepts **any** task's data key (e.g. `scan_result` for crm-qa, `review_data` for weekly-review). That means a new task injects its own data object and reuses the graph verbatim — the two shipped tasks exercise exactly this path, which is the proof the core is reusable.
+`build_graph` is deliberately decoupled from any single task. The `evaluator` and `fix` nodes read the real data through a small `_real_data(state)` helper that accepts **any** task's data key (e.g. `scan_result` for crm-qa, `review_data` for weekly-review, `draft_data` for follow-up-draft). That means a new task injects its own data object and reuses the graph verbatim — the three shipped tasks exercise exactly this path, which is the proof the core is reusable.
 
 ## Project Structure
 
@@ -78,6 +80,10 @@ langgraph-pse/
 │   └── weekly-review/        # Task 2: weekly relationship review
 │       ├── run.py            # Entry — deterministic aggregation (default) + optional LLM report
 │       ├── review_data.py    # Read-only SQLite aggregation (metrics + cooling + follow-ups)
+│       └── prompts/{planner,specialist,evaluator}.md
+│   └── follow-up-draft/      # Task 3: follow-up message drafter
+│       ├── run.py            # Entry — deterministic candidate/context (default) + optional LLM drafts
+│       ├── draft_data.py     # Read-only SQLite: follow-up candidates + real recent chat context
 │       └── prompts/{planner,specialist,evaluator}.md
 ├── pyproject.toml
 ├── Makefile
@@ -188,6 +194,21 @@ python tasks/weekly-review/run.py --db /path/to/crm.db
 make weekly-review-report     # --provider deepseek (default)
 make weekly-review-agnes      # --provider agnes
 python tasks/weekly-review/run.py --llm --provider agnes
+```
+
+### `follow-up-draft` — follow-up message drafter
+
+The third task, added to further prove the core is reusable. `draft_data.py` runs a deterministic, read-only query over `crm.db` to find contacts that have a `follow_up_date` set and are overdue or due within 7 days, then attaches each candidate's **real** recent chat (direction + local date + content), last-interaction date, and `follow_up_note`. With `--llm` the PSE trio drafts one personalized WeChat follow-up message per candidate; the `verify_fn` enforces that every draft names a real candidate, echoes any non-empty `follow_up_note`, and produces no fabricated contacts — so the model can never invent a relationship or shared history.
+
+```bash
+# Deterministic candidate + context aggregation only (zero cost)
+make follow-up-draft
+python tasks/follow-up-draft/run.py --db /path/to/crm.db
+
+# Personalized follow-up drafts via LLM
+make follow-up-draft-report     # --provider deepseek (default)
+make follow-up-draft-agnes      # --provider agnes
+python tasks/follow-up-draft/run.py --llm --provider agnes
 ```
 
 Both tasks read the DB strictly read-only (`mode=ro&immutable=1` for the scanners/aggregators; a single `SELECT` only for the `query_crm` tool).
