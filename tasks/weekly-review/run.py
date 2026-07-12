@@ -161,6 +161,8 @@ def main():
     print(f"   联系人 {m['total_contacts']} | 本周互动 {m['week_interactions']} "
           f"(涉及 {m['week_contacts']} 人) | 连续 {m['streak']} 天")
     print(f"   近30天活跃 {m['active_30d']} | 变冷(>30天) {m['stale_30d']} | 从未互动 {m['never_interacted']}")
+    di = m["week_interactions_delta"]
+    print(f"   本周互动环比上周: {di:+d} (上周 {m['week_interactions_prev']} 次 / {m['week_contacts_prev']} 人)")
     print(f"   跟进逾期 {m['follow_up_overdue']} | 7天内需跟进 {m['follow_up_due_7d']}")
 
     if not args.llm:

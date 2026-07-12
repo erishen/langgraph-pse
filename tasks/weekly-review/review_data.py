@@ -52,7 +52,7 @@ def gather(db_path: str = DEFAULT_DB) -> dict:
         )
     con = _open(db_path)
     cur = con.cursor()
-    today = date.today()
+    today = datetime.now(_SHANGHAI).date()  # 上海时区，与 contact_date 写入口径一致
     week_start = today - timedelta(days=today.weekday())  # 周一 00:00
     month_start = today.replace(day=1)
     d30 = today - timedelta(days=30)
@@ -102,6 +102,16 @@ def gather(db_path: str = DEFAULT_DB) -> dict:
         1 for d in first_inter.values()
         if d and date.fromisoformat(d) >= week_start
     )
+
+    # 上周互动（contact_date 在 [上周一, 本周一)），用于周环比趋势
+    prev_week_start = week_start - timedelta(days=7)
+    pw = cur.execute(
+        "SELECT COUNT(*), COUNT(DISTINCT contact_id) FROM contact_records "
+        "WHERE contact_date >= ? AND contact_date < ?",
+        (prev_week_start.isoformat(), week_start.isoformat()),
+    ).fetchone()
+    week_interactions_prev = int(pw[0] or 0)
+    week_contacts_prev = int(pw[1] or 0)
 
     # 每联系人元信息
     meta = {r["id"]: r for r in cur.execute(
@@ -224,6 +234,10 @@ def gather(db_path: str = DEFAULT_DB) -> dict:
         "streak": streak,
         "month_contacts": month_contacts,
         "new_contacts_this_week": new_contacts_this_week,
+        "week_interactions_prev": week_interactions_prev,
+        "week_contacts_prev": week_contacts_prev,
+        "week_interactions_delta": week_interactions - week_interactions_prev,
+        "week_contacts_delta": week_contacts - week_contacts_prev,
         "chat_messages_total": chat_messages_total,
         "contact_records_total": contact_records_total,
         "active_30d": active_30d,
