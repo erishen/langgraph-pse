@@ -1,9 +1,10 @@
-.PHONY: install lint clean crm-qa crm-qa-scan crm-qa-report crm-qa-agnes weekly-review weekly-review-report weekly-review-agnes follow-up-draft follow-up-draft-report follow-up-draft-agnes help
+.PHONY: install lint clean crm-qa crm-qa-scan crm-qa-report crm-qa-agnes weekly-review weekly-review-report weekly-review-agnes follow-up-draft follow-up-draft-report follow-up-draft-agnes interview-questions interview-questions-report interview-questions-agnes help
 
 PY := uv run python
 TASK := tasks/crm-qa/run.py
 WEEKLY := tasks/weekly-review/run.py
 DRAFT := tasks/follow-up-draft/run.py
+IQ := tasks/interview-questions/run.py
 
 install: ## 安装依赖（uv sync）
 	uv sync
@@ -59,6 +60,24 @@ follow-up-draft-report: ## LLM 个性化跟进草稿（deepseek）
 
 follow-up-draft-agnes: ## LLM 个性化跟进草稿（agnes）
 	$(PY) $(DRAFT) --llm --provider agnes $(if $(DB),--db $(DB),) $(FLAGS)
+
+# 面试题库生成：支持三种出题来源（编程语言/岗位、JD 文档、候选人简历）
+# 用法（零成本，打印规格）:
+#   make interview-questions                              # 默认 python 规格
+#   make interview-questions SUBJECT=react-python         # 指定内置对象
+#   make interview-questions JD=work/docs/jobs/jd/kpmg.md          # 按 JD 出题
+#   make interview-questions RESUME=work/docs/resume-pdf/zh-boss.pdf  # 按简历出题（只读 .md）
+# 生成（LLM）:
+#   make interview-questions-report [SUBJECT=|JD=|RESUME=] [PROVIDER=deepseek] [FLAGS=...]
+#   make interview-questions-agnes  [SUBJECT=|JD=|RESUME=]
+interview-questions: ## 打印面试题库规格（编程语言/岗位/JD/简历）
+	$(PY) $(IQ) $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
+
+interview-questions-report: ## LLM 生成面试题库（deepseek）
+	$(PY) $(IQ) --llm --provider deepseek $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
+
+interview-questions-agnes: ## LLM 生成面试题库（agnes）
+	$(PY) $(IQ) --llm --provider agnes $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
 
 help: ## 列出全部命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

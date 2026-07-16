@@ -1,8 +1,9 @@
 """LangGraph PSE — 通用 Planner → Specialist → Evaluator → Fix 状态机核心。
 
 任务无关：通过 task 参数加载 tasks/<task>/prompts/{planner,specialist,evaluator}.md，
-通过 verify_fn 注入任务专属的程序化核查。原 project-articles（文章写作）任务已移除；
-本框架现聚焦于 personal-crm 类任务（如 crm-qa 数据质量看门狗）。
+通过 verify_fn 注入任务专属的程序化核查。当前内置 4 个任务（均复用同一图，不改核心）：
+crm-qa（CRM 数据质量看门狗）、weekly-review（每周关系复盘）、
+follow-up-draft（跟进消息草拟）、interview-questions（面试题库生成，非 CRM 场景）。
 
 图结构:
     START → [planner] → specialist → evaluator ─┬─(通过)─▶ END
@@ -13,6 +14,7 @@
 """
 
 import json
+import re
 from typing import Callable, Optional, TypedDict
 
 from langchain.agents import create_agent
@@ -66,23 +68,39 @@ def _make_specialist_node(client, prompt: str, tools):
 
 
 def _real_data(state: PSEState) -> dict:
-    """取出任务真实数据载荷，任务无关：优先 scan_result，其次 review_data。
+    """取出任务真实数据载荷，任务无关：按各任务实际使用的 key 依次取首个非空值。
 
-    原 crm-qa 把扫描结果放在 task_data['scan_result']；新增任务（如 weekly-review）
-    放在 task_data['review_data']。二者皆可由 evaluator / fix 节点作为真实对照注入，
+    各任务把真实数据放在 task_data 的不同键下：crm-qa 用 scan_result，
+    weekly-review 用 review_data，follow-up-draft 用 draft_data；
+    interview-questions 复用 scan_result。evaluator / fix 节点据此注入真实对照，
     避免把校验/修正逻辑写死在单一 key 上。
     """
     td = state.get("task_data", {}) or {}
-    return td.get("scan_result") or td.get("review_data") or {}
+    return (td.get("scan_result") or td.get("review_data")
+            or td.get("draft_data") or {})
 
 
 def _parse_eval_issues(text: str) -> list[str]:
-    """解析评审员(LLM)输出：PASS/无问题 → []；否则收集 '- ' 开头的行。"""
+    """解析评审员(LLM)输出：PASS/无问题 → []；否则收集 '- ' 开头的真实缺陷行。
+
+    安全网：评审员偶尔违反纪律，把「XX（通过）」「XX 一致」类确认行也写成
+    '- ' 开头，会被误当成问题触发无谓的 fix 重试（浪费 token）。这里显式丢弃
+    含确认语义的行，只保留真正需要修复的缺陷。
+    """
     if not text:
         return []
     if "PASS" in text.upper() and "-" not in text:
         return []
-    issues = [ln[2:].strip() for ln in text.splitlines() if ln.strip().startswith("- ")]
+    confirm = re.compile(r"（通过）|通过。|一致。|无遗漏|✅|✔|——通过")
+    issues: list[str] = []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s.startswith("- "):
+            continue
+        body = s[2:].strip()
+        if confirm.search(body):
+            continue
+        issues.append(body)
     return issues
 
 

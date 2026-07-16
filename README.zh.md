@@ -8,10 +8,12 @@
 
 这是 [`crewai-pse`](../crewai-pse)、[`autogen-pse`](../autogen-pse)、[`llamaindex-pse`](../llamaindex-pse) 的 LangGraph 版本——同样的 PSE 理念，不同的编排原语：用 `StateGraph` + 条件边，而非 crew、群聊或事件工作流。
 
-仓库当前内置**两个任务**，二者共同证明核心是真正可复用的，而非一次性实现：
+仓库当前内置**四个任务**，四者共同证明核心是真正可复用的，而非一次性实现：
 
 - `crm-qa`——`personal-crm` 数据质量看门狗（确定性扫描 + 可选的经核查 LLM 报告）。
 - `weekly-review`——`personal-crm` 每周关系复盘（确定性聚合 + 可选的经核查 LLM 报告）。
+- `follow-up-draft`--`personal-crm` 跟进消息草拟（确定性候选 + 上下文聚合 + 可选的经核查 LLM 草稿）。
+- `interview-questions`--技术面试题库生成（确定性规格 + 可选的经核查 LLM 题库；素材：编程语言 / 岗位、JD 文档、候选人简历）。
 
 > [!NOTE]
 > **成本。** 确定性模式（`make crm-qa`、`make weekly-review`）**零成本**——完全不调 LLM。`--llm` 报告模式的成本 = 一次生成 + 每轮修正一次调用；在 DeepSeek Chat 上一篇报告通常 **2 轮收敛**、远低于 **¥0.05**。免费的 **Agnes** 网关（`--provider agnes`）让 LLM 运行基本免费。每次运行都会打印轮数与程序化核查的通过/失败情况。
@@ -38,11 +40,13 @@
 └──────────────────────────────────────────────────────────────────────────┘
             ▲
             │  每个任务通过  tasks/<task>/prompts/*.md + run.py (verify_fn)  挂载
-┌───────────┴─────────────────────────────────────────────────────────────┐
-│  tasks/crm-qa/         ← 任务 1：CRM 数据质量看门狗                         │
-│  tasks/weekly-review/  ← 任务 2：CRM 每周关系复盘                          │
-│  tasks/<你的任务>/     ← 自行添加；引擎保持不动                            │
-└───────────────────────────────────────────────────────────────────────────┘
+┌───────────┴──────────────────────────────────────────────┐
+│  tasks/crm-qa/              ← 任务 1：CRM 数据质量看门狗 │
+│  tasks/weekly-review/       ← 任务 2：CRM 每周关系复盘   │
+│  tasks/follow-up-draft/     ← 任务 3：CRM 跟进消息草拟   │
+│  tasks/interview-questions/ ← 任务 4：技术面试题库生成   │
+│  tasks/<你的任务>/          ← 自行添加；引擎保持不动     │
+└──────────────────────────────────────────────────────────┘
 ```
 
 1. **Planner（可选）**——通过沙箱化的 `read_file` 工具读取上下文，产出执行计划。按任务用 `use_planner` 开关。
@@ -56,7 +60,7 @@
 
 ### 任务无关的核心
 
-`build_graph` 刻意与任何单一任务解耦。`evaluator` 和 `fix` 节点通过一个小助手 `_real_data(state)` 读取真实数据，它接受**任意**任务的数据键（crm-qa 用 `scan_result`，weekly-review 用 `review_data`）。这意味着新任务只需注入自己的数据对象、原样复用图——两个内置任务走的正是这条路径，这就是核心可复用的证明。
+`build_graph` 刻意与任何单一任务解耦。`evaluator` 和 `fix` 节点通过一个小助手 `_real_data(state)` 读取真实数据，它接受**任意**任务的数据键（crm-qa 用 `scan_result`，weekly-review 用 `review_data`，follow-up-draft 用 `draft_data`，interview-questions 复用 `scan_result`）。这意味着新任务只需注入自己的数据对象、原样复用图——四个内置任务走的正是这条路径，这就是核心可复用的证明。
 
 ## 目录结构
 
@@ -71,12 +75,19 @@ langgraph-pse/
 │   └── graph.py              # StateGraph：planner → specialist → evaluator → fix
 ├── tasks/                    # ← 扩展点：一个任务一个文件夹
 │   ├── crm-qa/               # 任务 1：数据质量看门狗
-│   │   ├── run.py            # 入口——确定性扫描（默认）+ 可选 LLM 报告
+│   │   ├── run.py            # 入口--确定性扫描（默认）+ 可选 LLM 报告
 │   │   ├── qa_scan.py        # personal-crm /api/qa/report 的 HTTP 客户端（唯一真源）
 │   │   └── prompts/{planner,specialist,evaluator}.md
-│   └── weekly-review/        # 任务 2：每周关系复盘
-│       ├── run.py            # 入口——确定性聚合（默认）+ 可选 LLM 报告
-│       ├── review_data.py    # 只读 SQLite 聚合（指标 + 变冷关系 + 待跟进）
+│   ├── weekly-review/        # 任务 2：每周关系复盘
+│   │   ├── run.py            # 入口--确定性聚合（默认）+ 可选 LLM 报告
+│   │   ├── review_data.py    # 只读 SQLite 聚合（指标 + 变冷关系 + 待跟进）
+│   │   └── prompts/{planner,specialist,evaluator}.md
+│   ├── follow-up-draft/      # 任务 3：跟进消息草拟
+│   │   ├── run.py            # 入口--确定性候选 / 上下文（默认）+ 可选 LLM 草稿
+│   │   ├── draft_data.py     # 只读 SQLite：跟进候选 + 真实近期聊天上下文
+│   │   └── prompts/{planner,specialist,evaluator}.md
+│   └── interview-questions/  # 任务 4：技术面试题库生成
+│       ├── run.py            # 入口--确定性规格（默认）+ 可选 LLM 题库
 │       └── prompts/{planner,specialist,evaluator}.md
 ├── pyproject.toml
 ├── Makefile
@@ -189,7 +200,39 @@ make weekly-review-agnes      # --provider agnes
 python tasks/weekly-review/run.py --llm --provider agnes
 ```
 
-两个任务都严格只读打开数据库（扫描/聚合用 `mode=ro&immutable=1`；`query_crm` 工具仅允许单条 `SELECT`）。
+### `follow-up-draft`--跟进消息草拟
+
+第三个任务，进一步验证核心可复用。`draft_data.py` 对 `crm.db` 做确定性只读查询，找出设了 `follow_up_date` 且已逾期或 7 天内到期的联系人，并附上每位候选人的**真实**近期聊天（方向 + 本地日期 + 内容）、最近互动日期与 `follow_up_note`。加 `--llm` 后由 PSE 三角色为每位候选人生成一条个性化微信跟进文案；`verify_fn` 强制每条草稿点名真实候选人、回显非空的 `follow_up_note`、且不得编造联系人--模型永远无法凭空捏造关系或共同经历。
+
+```bash
+# 仅确定性候选 + 上下文聚合（零成本）
+make follow-up-draft
+python tasks/follow-up-draft/run.py --db /path/to/crm.db
+
+# 个性化跟进草稿（LLM）
+make follow-up-draft-report     # --provider deepseek（默认）
+make follow-up-draft-agnes      # --provider agnes
+python tasks/follow-up-draft/run.py --llm --provider agnes
+```
+
+### `interview-questions`--技术面试题库生成
+
+第四个任务，证明核心在 CRM 之外也可复用。与三个 CRM 任务不同，它**没有数据库**--出题素材是编程语言 / 岗位、JD 文档或候选人简历，外加从素材中提取的「考察主题清单」。结构性约束（题量 9、难度 3/3/3、编码题含代码块）一律由确定性后处理 `_normalize_artifact` 保证；`verify_fn` 仅保留内容层硬约束：每题主题必须来自声明清单--模型永远无法编造主题。这彻底消除了全局计数类约束导致的 retry 死循环。
+
+```bash
+# 仅确定性规格（零成本）
+make interview-questions
+make interview-questions SUBJECT=react-python
+make interview-questions JD=work/docs/jobs/jd/kpmg.md
+make interview-questions RESUME=work/docs/resume-pdf/zh-boss.pdf
+
+# LLM 生成题库
+make interview-questions-report  # --provider deepseek（默认）
+make interview-questions-agnes   # --provider agnes
+python tasks/interview-questions/run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider agnes
+```
+
+三个 CRM 任务都严格只读打开数据库（扫描/聚合用 `mode=ro&immutable=1`；`query_crm` 工具仅允许单条 `SELECT`）；`interview-questions` 无数据库，仅经 `read_file` 读取 JD / 简历文件。
 
 ## 关键设计决策
 
@@ -211,7 +254,7 @@ python tasks/weekly-review/run.py --llm --provider agnes
 | 重试循环 | 两段式直连 API + grep 核查 | `run.py` 里程序化核查 | `add_conditional_edges("evaluator", should_fix)` | Evaluator 返回 `FixEvent` / `StopEvent` |
 | 核查步骤 | 对源码 grep | `run.py` 里正则/grep | 图中注入 `verify_fn` | 工作流中注入 `verify_fn` |
 | RAG | 可选 | — | — | **内置**（`retriever`，源头接地） |
-| 实际用途 | asset-lens → 下周投资建议 | 项目代码 → 中英文章 → WordPress | **CRM 数据质量 QA + 每周关系复盘** | 简历定制（RAG） |
+| 实际用途 | asset-lens → 下周投资建议 | 项目代码 → 中英文章 → WordPress | **CRM QA / 每周复盘 / 跟进草拟 + 面试题库** | 简历定制（RAG） |
 | 最适合 | 便宜、高频草稿 | 更丰富的多 Agent 发布 | 需要显式状态控制 + 抗幻觉关卡的工作流 | RAG 接地生成 |
 
 ## 安全说明
