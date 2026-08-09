@@ -268,9 +268,7 @@ All four share the **PSE role model** and a **verify→fix loop**, but differ in
 ---
 
 ## Related Articles
-
-- English: [LangGraph PSE: Design Decisions](https://erishen.cn/langgraph-pse-design-decisions-en/)
-- 中文: [LangGraph PSE：设计决策](https://erishen.cn/langgraph-pse-design-decisions/)
+- [LangGraph PSE: Explicitly Modeling PSE Tri-role Collaboration with State Machines](https://erishen.cn/langgraph-pse-design-decisions-en/)
 
 ## License
 

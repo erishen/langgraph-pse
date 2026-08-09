@@ -271,6 +271,4 @@ MIT
 ---
 
 ## 相关文章
-
-- 中文: [LangGraph PSE：设计决策](https://erishen.cn/langgraph-pse-design-decisions/)
-- English: [LangGraph PSE: Design Decisions](https://erishen.cn/langgraph-pse-design-decisions-en/)
+- [LangGraph PSE: 用状态机显式建模 PSE 三角色协作](https://erishen.cn/langgraph-pse-design-decisions/)
