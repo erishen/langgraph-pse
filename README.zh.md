@@ -267,3 +267,10 @@ python tasks/interview-questions/run.py --resume work/docs/resume-pdf/zh-boss.md
 ## 许可证
 
 MIT
+
+---
+
+## 相关文章
+
+- 中文: [LangGraph PSE：设计决策](https://erishen.cn/langgraph-pse-design-decisions/)
+- English: [LangGraph PSE: Design Decisions](https://erishen.cn/langgraph-pse-design-decisions-en/)

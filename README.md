@@ -265,6 +265,13 @@ All four share the **PSE role model** and a **verify→fix loop**, but differ in
 - **Sandboxed tools & read-only DB.** See [Key Design Decisions](#key-design-decisions).
 - **No network-exposed service.** This project runs locally as a CLI.
 
+---
+
+## Related Articles
+
+- English: [LangGraph PSE: Design Decisions](https://erishen.cn/langgraph-pse-design-decisions-en/)
+- 中文: [LangGraph PSE：设计决策](https://erishen.cn/langgraph-pse-design-decisions/)
+
 ## License
 
 MIT
