@@ -10,15 +10,19 @@ LangChain 的 `max_retries` 已能覆盖大部分瞬时错误；这里再叠加�
 """
 
 
+from typing import Optional
+
 from langchain_openai import ChatOpenAI
 
 from .config import settings
 
 
-def create_model(provider: str = "deepseek") -> ChatOpenAI:
+def create_model(provider: str = "deepseek", max_tokens: Optional[int] = None) -> ChatOpenAI:
     """创建 OpenAI 兼容 ChatModel（含工具调用能力）。
 
     provider: "deepseek" | "agnes"
+    max_tokens: 最大输出 token 数。None 表示使用模型默认值。
+        长输出任务（如 interview-questions 生成 9 道题）建议显式设置较大值（如 16000）。
     """
     if provider == "agnes":
         api_key = settings.AGNES_KEY
@@ -39,7 +43,7 @@ def create_model(provider: str = "deepseek") -> ChatOpenAI:
         raise RuntimeError(
             f"未设置 {label}_MODEL。请在 .env 中补充模型名（例如 AGNES_MODEL）。"
         )
-    return ChatOpenAI(
+    kwargs = dict(
         model=model,
         api_key=api_key,
         base_url=base_url or None,
@@ -48,3 +52,6 @@ def create_model(provider: str = "deepseek") -> ChatOpenAI:
         timeout=180,
         streaming=False,
     )
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    return ChatOpenAI(**kwargs)

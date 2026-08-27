@@ -199,6 +199,7 @@ def build_graph(
     max_retries: int = 3,
     use_planner: bool = True,
     provider: str = "deepseek",
+    max_tokens: Optional[int] = None,
 ):
     """构建并编译通用 PSE 图。
 
@@ -208,10 +209,11 @@ def build_graph(
     verify_fn:   程序化核查函数，签名 (state) -> (bad: list, ok: list)；不传则默认通过。
     use_planner: 是否包含 planner 节点（无规划需求的任务可关掉，从 specialist 起步）。
     provider:    "deepseek" | "agnes"，决定 LLM 网关。
+    max_tokens:  最大输出 token 数（仅在 client 为 None 时生效）。长输出任务建议显式设置。
     返回编译后的 graph，用 graph.invoke({task_input, task_data, max_retries}) 调用。
     """
     if client is None:
-        client = create_model(provider)
+        client = create_model(provider, max_tokens=max_tokens)
     tools = tools or [read_file, run_bash]
 
     planner_prompt = load_prompt("planner", task) if use_planner else ""

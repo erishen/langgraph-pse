@@ -669,6 +669,8 @@ def main():
         use_planner=True,
         max_retries=max_retries,
         provider=args.provider,
+        # 9 道题（含描述+参考答案+代码块）输出量大，显式放宽 max_tokens
+        max_tokens=16000,
     )
 
     result = graph.invoke({
