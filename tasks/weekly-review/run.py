@@ -151,8 +151,8 @@ def main():
     ap.add_argument("--db", default=os.getenv("CRM_DB_PATH", DEFAULT_DB))
     ap.add_argument("--llm", action="store_true",
                     help="用 LLM 生成自然语言复盘（需 langgraph + API key）")
-    ap.add_argument("--provider", choices=["deepseek", "agnes"], default="deepseek",
-                    help="LLM 网关：deepseek（默认）或 agnes（需配置 AGNES_*）")
+    ap.add_argument("--provider", choices=["deepseek", "free"], default="deepseek",
+                    help="LLM 网关：deepseek（默认）或 free（需配置 FREE_*）")
     args = ap.parse_args()
 
     print(f"🔍 聚合每周关系复盘数据: {args.db}")

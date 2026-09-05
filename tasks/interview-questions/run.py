@@ -21,7 +21,7 @@
     python run.py --jd work/docs/jobs/jd/kpmg.md   # 按 JD 文档出题（从中提取考察主题）
     python run.py --resume work/docs/resume-pdf/zh-boss.pdf   # 按简历出题（自动读同名 .md，提取项目/公司/技能为主题）
     python run.py --llm                  # 用 LLM 生成题库（需 langgraph + key）
-    python run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider agnes
+    python run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider free
 """
 
 import argparse
@@ -560,8 +560,8 @@ def main():
                          "提取项目/公司/技能为主题（优先级最高）")
     ap.add_argument("--llm", action="store_true",
                     help="用 LLM 生成题库（需 langgraph + API key）")
-    ap.add_argument("--provider", choices=["deepseek", "agnes"], default="deepseek",
-                    help="LLM 网关：deepseek（默认）或 agnes（需配置 AGNES_*）")
+    ap.add_argument("--provider", choices=["deepseek", "free"], default="deepseek",
+                    help="LLM 网关：deepseek（默认）或 free（需配置 FREE_*）")
     args = ap.parse_args()
 
     # ── 确定出题来源：resume > jd > subject ──

@@ -16,7 +16,7 @@ The repository currently ships **four tasks**, which together prove the core is 
 - `interview-questions` - a tech interview question bank generator (deterministic spec + optional verified LLM questions; sources: a programming language/role, a JD doc, or a candidate résumé).
 
 > [!NOTE]
-> **Cost.** The deterministic modes (`make crm-qa`, `make weekly-review`) cost **zero** — they never call an LLM. The `--llm` report modes cost one generation plus one round per fix retry; on DeepSeek Chat a report typically converges in **2 rounds** for well under **¥0.05**. The free **Agnes** provider (`--provider agnes`) makes LLM runs effectively free. Every run prints the round count and pass/fail of the programmatic checks.
+> **Cost.** The deterministic modes (`make crm-qa`, `make weekly-review`) cost **zero** — they never call an LLM. The `--llm` report modes cost one generation plus one round per fix retry; on DeepSeek Chat a report typically converges in **2 rounds** for well under **¥0.05**. The free `free` provider (`--provider free`) makes LLM runs effectively free. Every run prints the round count and pass/fail of the programmatic checks.
 
 ## How It Works
 
@@ -70,7 +70,7 @@ langgraph-pse/
 ├── src/langgraph_pse/        # Core framework (task-agnostic)
 │   ├── __init__.py           # Public API: build_graph(), create_model()
 │   ├── config.py             # Settings from environment / .env
-│   ├── model.py              # Retrying ChatOpenAI client (deepseek / agnes)
+│   ├── model.py              # Retrying ChatOpenAI client (deepseek / free)
 │   ├── tools.py              # read_file + run_bash (sandboxed) + query_crm (read-only)
 │   ├── prompts.py            # Prompt loader → tasks/<task>/prompts/<name>.md
 │   └── graph.py              # StateGraph: planner → specialist → evaluator → fix
@@ -133,7 +133,7 @@ result = graph.invoke({
 print(result["artifact"])
 ```
 
-**4. (Optional) Add Makefile targets** following the existing pattern (`deterministic` / `--provider deepseek` / `--provider agnes`).
+**4. (Optional) Add Makefile targets** following the existing pattern (`deterministic` / `--provider deepseek` / `--provider free`).
 
 That's it. The core graph, retry logic, and sandbox are reused as-is.
 
@@ -151,21 +151,21 @@ Copy `.env.example` to `.env` and fill in your values:
 cp .env.example .env
 ```
 
-For the LLM report you need **either** the `OPENAI_*` set (DeepSeek is OpenAI-compatible) **or** the `AGNES_*` set. Both are supported via `--provider {deepseek,agnes}`.
+For the LLM report you need **either** the `OPENAI_*` set (DeepSeek is OpenAI-compatible) **or** the `FREE_*` set. Both are supported via `--provider {deepseek,free}`.
 
 | Variable | Required | Description |
 |---|---|---|
 | `OPENAI_API_KEY` | ✅* | LLM API key (OpenAI-compatible, e.g. DeepSeek) |
 | `OPENAI_BASE_URL` | ✅* | LLM API base URL |
 | `OPENAI_MODEL` | ✅* | Model name (e.g. `deepseek-chat`) |
-| `AGNES_KEY` | ✅† | Alternative: Agnes API key (free model) |
-| `AGNES_BASE_URL` | ✅† | Alternative: Agnes base URL |
-| `AGNES_MODEL` | ✅† | Alternative: Agnes model name (e.g. `agnes-2.0-flash`) |
+| `FREE_KEY` | ✅† | Alternative: free gateway API key (free model) |
+| `FREE_BASE_URL` | ✅† | Alternative: free gateway base URL |
+| `FREE_MODEL` | ✅† | Alternative: free gateway model name (e.g. `free-2.0-flash`) |
 | `PSE_ROOT` | ✅ | Sandbox root for `read_file` / `run_bash` |
 | `CRM_DB_PATH` | ✅ | Path to personal-crm's `crm.db` (read-only; used by both tasks) |
 | `PSE_MAX_RETRIES` | | Max evaluator/fix rounds (default: `3`) |
 
-\* required if `--provider deepseek` (the default).  &nbsp; † required if `--provider agnes`.
+\* required if `--provider deepseek` (the default).  &nbsp; † required if `--provider free`.
 
 ## Tasks
 
@@ -180,8 +180,8 @@ python tasks/crm-qa/run.py --db /path/to/crm.db
 
 # Natural-language QA report via LLM
 make crm-qa-report            # --provider deepseek (default)
-make crm-qa-agnes             # --provider agnes
-python tasks/crm-qa/run.py --llm --provider agnes
+make crm-qa-free             # --provider free
+python tasks/crm-qa/run.py --llm --provider free
 ```
 
 > **Watchdog only, no auto-repair.** crm-qa intentionally *reports* problems; it never modifies `crm.db`. Any repair stays a manual step so a model can never mutate production data.
@@ -197,8 +197,8 @@ python tasks/weekly-review/run.py --db /path/to/crm.db
 
 # Natural-language review via LLM
 make weekly-review-report     # --provider deepseek (default)
-make weekly-review-agnes      # --provider agnes
-python tasks/weekly-review/run.py --llm --provider agnes
+make weekly-review-free      # --provider free
+python tasks/weekly-review/run.py --llm --provider free
 ```
 
 ### `follow-up-draft` — follow-up message drafter
@@ -212,8 +212,8 @@ python tasks/follow-up-draft/run.py --db /path/to/crm.db
 
 # Personalized follow-up drafts via LLM
 make follow-up-draft-report     # --provider deepseek (default)
-make follow-up-draft-agnes      # --provider agnes
-python tasks/follow-up-draft/run.py --llm --provider agnes
+make follow-up-draft-free      # --provider free
+python tasks/follow-up-draft/run.py --llm --provider free
 ```
 
 ### `interview-questions` - tech interview question bank
@@ -229,8 +229,8 @@ make interview-questions RESUME=work/docs/resume-pdf/zh-boss.pdf
 
 # LLM-generated question bank
 make interview-questions-report   # --provider deepseek (default)
-make interview-questions-agnes    # --provider agnes
-python tasks/interview-questions/run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider agnes
+make interview-questions-free    # --provider free
+python tasks/interview-questions/run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider free
 ```
 
 The three CRM tasks read the DB strictly read-only. `crm-qa` calls personal-crm's `GET /api/qa/report` — the single source of truth for QA checks (no duplicate scanning); `weekly-review` aggregates directly via `mode=ro&immutable=1`; `query_crm` allows only a single `SELECT`.

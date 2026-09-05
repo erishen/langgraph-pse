@@ -16,7 +16,7 @@
 - `interview-questions`--技术面试题库生成（确定性规格 + 可选的经核查 LLM 题库；素材：编程语言 / 岗位、JD 文档、候选人简历）。
 
 > [!NOTE]
-> **成本。** 确定性模式（`make crm-qa`、`make weekly-review`）**零成本**——完全不调 LLM。`--llm` 报告模式的成本 = 一次生成 + 每轮修正一次调用；在 DeepSeek Chat 上一篇报告通常 **2 轮收敛**、远低于 **¥0.05**。免费的 **Agnes** 网关（`--provider agnes`）让 LLM 运行基本免费。每次运行都会打印轮数与程序化核查的通过/失败情况。
+> **成本。** 确定性模式（`make crm-qa`、`make weekly-review`）**零成本**——完全不调 LLM。`--llm` 报告模式的成本 = 一次生成 + 每轮修正一次调用；在 DeepSeek Chat 上一篇报告通常 **2 轮收敛**、远低于 **¥0.05**。免费的 **free** 网关（`--provider free`）让 LLM 运行基本免费。每次运行都会打印轮数与程序化核查的通过/失败情况。
 
 ## 工作原理
 
@@ -69,7 +69,7 @@ langgraph-pse/
 ├── src/langgraph_pse/        # 核心框架（任务无关）
 │   ├── __init__.py           # 公共 API：build_graph()、create_model()
 │   ├── config.py             # 从环境变量 / .env 读取配置
-│   ├── model.py              # 带重试的 ChatOpenAI 客户端（deepseek / agnes）
+│   ├── model.py              # 带重试的 ChatOpenAI 客户端（deepseek / free）
 │   ├── tools.py              # read_file + run_bash（沙箱）+ query_crm（只读）
 │   ├── prompts.py            # 提示词加载器 → tasks/<task>/prompts/<name>.md
 │   └── graph.py              # StateGraph：planner → specialist → evaluator → fix
@@ -132,7 +132,7 @@ result = graph.invoke({
 print(result["artifact"])
 ```
 
-**4.（可选）加 Makefile 目标**，沿用现有模式（`确定性` / `--provider deepseek` / `--provider agnes`）。
+**4.（可选）加 Makefile 目标**，沿用现有模式（`确定性` / `--provider deepseek` / `--provider free`）。
 
 就这样。核心图、重试逻辑、沙箱全部原样复用。
 
@@ -150,21 +150,21 @@ make install        # 或：uv sync
 cp .env.example .env
 ```
 
-跑 LLM 报告需要**要么**配好 `OPENAI_*`（DeepSeek 兼容 OpenAI 协议），**要么**配好 `AGNES_*`。二者都可通过 `--provider {deepseek,agnes}` 切换。
+跑 LLM 报告需要**要么**配好 `OPENAI_*`（DeepSeek 兼容 OpenAI 协议），**要么**配好 `FREE_*`。二者都可通过 `--provider {deepseek,free}` 切换。
 
 | 变量 | 必需 | 说明 |
 |---|---|---|
 | `OPENAI_API_KEY` | ✅* | LLM API key（OpenAI 兼容，如 DeepSeek） |
 | `OPENAI_BASE_URL` | ✅* | LLM API base URL |
 | `OPENAI_MODEL` | ✅* | 模型名（如 `deepseek-chat`） |
-| `AGNES_KEY` | ✅† | 备选：Agnes API key（免费模型） |
-| `AGNES_BASE_URL` | ✅† | 备选：Agnes base URL |
-| `AGNES_MODEL` | ✅† | 备选：Agnes 模型名（如 `agnes-2.0-flash`） |
+| `FREE_KEY` | ✅† | 备选：free gateway API key（免费模型） |
+| `FREE_BASE_URL` | ✅† | 备选：free gateway base URL |
+| `FREE_MODEL` | ✅† | 备选：free 网关模型名（如 `free-2.0-flash`） |
 | `PSE_ROOT` | ✅ | `read_file` / `run_bash` 的沙箱根目录 |
 | `CRM_DB_PATH` | ✅ | personal-crm 的 `crm.db` 路径（只读；两个任务都用） |
 | `PSE_MAX_RETRIES` | | evaluator/fix 最大轮数（默认 `3`） |
 
-\* 用 `--provider deepseek`（默认）时必需。  &nbsp; † 用 `--provider agnes` 时必需。
+\* 用 `--provider deepseek`（默认）时必需。  &nbsp; † 用 `--provider free` 时必需。
 
 ## 任务
 
@@ -179,8 +179,8 @@ python tasks/crm-qa/run.py --db /path/to/crm.db
 
 # 用 LLM 生成自然语言 QA 报告
 make crm-qa-report            # --provider deepseek（默认）
-make crm-qa-agnes             # --provider agnes
-python tasks/crm-qa/run.py --llm --provider agnes
+make crm-qa-free             # --provider free
+python tasks/crm-qa/run.py --llm --provider free
 ```
 
 > **只看门、不自动修。** crm-qa 刻意只*报告*问题，绝不修改 `crm.db`。任何修复都保留为人工步骤，让模型永远无法改动生产数据。
@@ -196,8 +196,8 @@ python tasks/weekly-review/run.py --db /path/to/crm.db
 
 # 用 LLM 生成自然语言复盘
 make weekly-review-report     # --provider deepseek（默认）
-make weekly-review-agnes      # --provider agnes
-python tasks/weekly-review/run.py --llm --provider agnes
+make weekly-review-free      # --provider free
+python tasks/weekly-review/run.py --llm --provider free
 ```
 
 ### `follow-up-draft`--跟进消息草拟
@@ -211,8 +211,8 @@ python tasks/follow-up-draft/run.py --db /path/to/crm.db
 
 # 个性化跟进草稿（LLM）
 make follow-up-draft-report     # --provider deepseek（默认）
-make follow-up-draft-agnes      # --provider agnes
-python tasks/follow-up-draft/run.py --llm --provider agnes
+make follow-up-draft-free      # --provider free
+python tasks/follow-up-draft/run.py --llm --provider free
 ```
 
 ### `interview-questions`--技术面试题库生成
@@ -228,8 +228,8 @@ make interview-questions RESUME=work/docs/resume-pdf/zh-boss.pdf
 
 # LLM 生成题库
 make interview-questions-report  # --provider deepseek（默认）
-make interview-questions-agnes   # --provider agnes
-python tasks/interview-questions/run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider agnes
+make interview-questions-free   # --provider free
+python tasks/interview-questions/run.py --resume work/docs/resume-pdf/zh-boss.md --llm --provider free
 ```
 
 三个 CRM 任务都严格只读打开数据库（扫描/聚合用 `mode=ro&immutable=1`；`query_crm` 工具仅允许单条 `SELECT`）；`interview-questions` 无数据库，仅经 `read_file` 读取 JD / 简历文件。

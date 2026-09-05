@@ -1,4 +1,4 @@
-.PHONY: install lint clean crm-qa crm-qa-scan crm-qa-report crm-qa-agnes weekly-review weekly-review-report weekly-review-agnes follow-up-draft follow-up-draft-report follow-up-draft-agnes interview-questions interview-questions-report interview-questions-agnes help
+.PHONY: install lint clean crm-qa crm-qa-scan crm-qa-report crm-qa-free weekly-review weekly-review-report weekly-review-free follow-up-draft follow-up-draft-report follow-up-draft-free interview-questions interview-questions-report interview-questions-free help
 
 PY := uv run python
 TASK := tasks/crm-qa/run.py
@@ -26,12 +26,12 @@ crm-qa-scan: ## 显式调用（等价于 crm-qa）
 
 # 生成自然语言 QA 报告（LLM）
 # 用法: make crm-qa-report [API=...] [FLAGS=...]   —— deepseek 默认
-#       make crm-qa-agnes   [API=...] [FLAGS=...]   —— agnes 网关
+#       make crm-qa-free   [API=...] [FLAGS=...]   —— free 网关
 crm-qa-report: ## LLM 自然语言报告（deepseek）
 	$(PY) $(TASK) --llm --provider deepseek $(if $(API),--api-base-url $(API),) $(FLAGS)
 
-crm-qa-agnes: ## LLM 自然语言报告（agnes）
-	$(PY) $(TASK) --llm --provider agnes $(if $(API),--api-base-url $(API),) $(FLAGS)
+crm-qa-free: ## LLM 自然语言报告（free）
+	$(PY) $(TASK) --llm --provider free $(if $(API),--api-base-url $(API),) $(FLAGS)
 
 # 每周关系复盘：确定性只读聚合（零成本，不改库）—— 验证通用核心的第二个任务
 # 用法: make weekly-review [DB=/path/to/crm.db] [FLAGS=...]
@@ -40,12 +40,12 @@ weekly-review: ## 只读聚合每周关系复盘并打印
 
 # 生成自然语言复盘（LLM）
 # 用法: make weekly-review-report [DB=...] [FLAGS=...]   —— deepseek 默认
-#       make weekly-review-agnes   [DB=...] [FLAGS=...]   —— agnes 网关
+#       make weekly-review-free   [DB=...] [FLAGS=...]   —— free 网关
 weekly-review-report: ## LLM 自然语言复盘（deepseek）
 	$(PY) $(WEEKLY) --llm --provider deepseek $(if $(DB),--db $(DB),) $(FLAGS)
 
-weekly-review-agnes: ## LLM 自然语言复盘（agnes）
-	$(PY) $(WEEKLY) --llm --provider agnes $(if $(DB),--db $(DB),) $(FLAGS)
+weekly-review-free: ## LLM 自然语言复盘（free）
+	$(PY) $(WEEKLY) --llm --provider free $(if $(DB),--db $(DB),) $(FLAGS)
 
 # 跟进消息草拟：确定性只读聚合候选人+真实上下文（零成本，不改库）—— 验证通用核心的第三个任务
 # 用法: make follow-up-draft [DB=/path/to/crm.db] [FLAGS=...]
@@ -54,12 +54,12 @@ follow-up-draft: ## 只读聚合待跟进候选人与上下文并打印
 
 # 生成个性化跟进草稿（LLM）
 # 用法: make follow-up-draft-report [DB=...] [FLAGS=...]   —— deepseek 默认
-#       make follow-up-draft-agnes   [DB=...] [FLAGS=...]   —— agnes 网关
+#       make follow-up-draft-free   [DB=...] [FLAGS=...]   —— free 网关
 follow-up-draft-report: ## LLM 个性化跟进草稿（deepseek）
 	$(PY) $(DRAFT) --llm --provider deepseek $(if $(DB),--db $(DB),) $(FLAGS)
 
-follow-up-draft-agnes: ## LLM 个性化跟进草稿（agnes）
-	$(PY) $(DRAFT) --llm --provider agnes $(if $(DB),--db $(DB),) $(FLAGS)
+follow-up-draft-free: ## LLM 个性化跟进草稿（free）
+	$(PY) $(DRAFT) --llm --provider free $(if $(DB),--db $(DB),) $(FLAGS)
 
 # 面试题库生成：支持三种出题来源（编程语言/岗位、JD 文档、候选人简历）
 # 用法（零成本，打印规格）:
@@ -69,15 +69,15 @@ follow-up-draft-agnes: ## LLM 个性化跟进草稿（agnes）
 #   make interview-questions RESUME=work/docs/resume-pdf/zh-boss.pdf  # 按简历出题（只读 .md）
 # 生成（LLM）:
 #   make interview-questions-report [SUBJECT=|JD=|RESUME=] [PROVIDER=deepseek] [FLAGS=...]
-#   make interview-questions-agnes  [SUBJECT=|JD=|RESUME=]
+#   make interview-questions-free  [SUBJECT=|JD=|RESUME=]
 interview-questions: ## 打印面试题库规格（编程语言/岗位/JD/简历）
 	$(PY) $(IQ) $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
 
 interview-questions-report: ## LLM 生成面试题库（deepseek）
 	$(PY) $(IQ) --llm --provider deepseek $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
 
-interview-questions-agnes: ## LLM 生成面试题库（agnes）
-	$(PY) $(IQ) --llm --provider agnes $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
+interview-questions-free: ## LLM 生成面试题库（free）
+	$(PY) $(IQ) --llm --provider free $(if $(SUBJECT),--subject $(SUBJECT),) $(if $(JD),--jd $(JD),) $(if $(RESUME),--resume $(RESUME),) $(FLAGS)
 
 help: ## 列出全部命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

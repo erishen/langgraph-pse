@@ -84,8 +84,8 @@ def main():
                     help="personal-crm 后端地址（含 http://），默认取 CRM_API_BASE_URL 或 http://127.0.0.1:8000")
     ap.add_argument("--llm", action="store_true",
                     help="用 LLM 生成自然语言 QA 报告（需 langgraph + API key）")
-    ap.add_argument("--provider", choices=["deepseek", "agnes"], default="deepseek",
-                    help="LLM 网关：deepseek（默认）或 agnes（需配置 AGNES_*）")
+    ap.add_argument("--provider", choices=["deepseek", "free"], default="deepseek",
+                    help="LLM 网关：deepseek（默认）或 free（需配置 FREE_*）")
     args = ap.parse_args()
 
     print(f"🔍 调用数据质量 API: {args.api_base_url}/api/qa/report")
